@@ -1,0 +1,17 @@
+%YAML 1.1
+---
+
+outputs:
+  - eve-log:
+      enabled: yes
+      filetype: regular
+      filename: eve.json
+      # тут пиши eve.json в каталог логів (-l), який ми виставимо на /traffic
+      types:
+        - alert:
+            metadata: yes
+            tagged-packets: yes
+      # якщо потреби можна вимкнути community id та інші важкі поля
+      community-id: false
+
+# мінімальний скелет, решта буде дефолт suricata

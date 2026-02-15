@@ -1,0 +1,162 @@
+services:
+  tulip-timescale:
+    build: ./vendor/tulip/services/timescale
+    image: tulip-timescale:latest
+    restart: unless-stopped
+    environment:
+      POSTGRES_HOST_AUTH_METHOD: trust
+      POSTGRES_USER: tulip
+      POSTGRES_DB: tulip
+    volumes:
+      - tulip-timescale-data:/var/lib/postgresql/data
+      - ./vendor/tulip/services/schema/system.sql:/docker-entrypoint-initdb.d/100_system.sql:ro
+      - ./vendor/tulip/services/schema/functions.sql:/docker-entrypoint-initdb.d/101_functions.sql:ro
+      - ./vendor/tulip/services/schema/schema.sql:/docker-entrypoint-initdb.d/102_schema.sql:ro
+    shm_size: "2g"
+
+  tulip-api:
+    build:
+      context: ./vendor/tulip/services/api
+      dockerfile: Dockerfile-api
+    image: tulip-api:latest
+    restart: unless-stopped
+    depends_on: [tulip-timescale]
+    volumes:
+      - ${TRAFFIC_DIR_HOST}:${TRAFFIC_DIR_DOCKER}:ro
+    environment:
+      TIMESCALE: ${TIMESCALE}
+      TULIP_TRAFFIC_DIR: ${TRAFFIC_DIR_DOCKER}
+      FLAG_REGEX: ${FLAG_REGEX}
+      TICK_START: ${TICK_START}
+      TICK_LENGTH: ${TICK_LENGTH}
+      VM_IP: ${VM_IP}
+
+  tulip-assembler:
+    build:
+      context: ./vendor/tulip/services/go-importer
+      dockerfile: Dockerfile-assembler
+    image: tulip-assembler:latest
+    restart: unless-stopped
+    depends_on: [tulip-timescale]
+    volumes:
+      - ${TRAFFIC_DIR_HOST}:${TRAFFIC_DIR_DOCKER}:ro
+    command: "./assembler -http-session-tracking -skipchecksum -disable-converters -dir ${TRAFFIC_DIR_DOCKER}"
+    environment:
+      TIMESCALE: ${TIMESCALE}
+      FLAG_REGEX: ${FLAG_REGEX}
+      TICK_START: ${TICK_START}
+      TICK_LENGTH: ${TICK_LENGTH}
+      FLAGID_SCAN: ${FLAGID_SCAN}
+      FLAG_LIFETIME: ${FLAG_LIFETIME}
+      FLAG_VALIDATOR_TYPE: ${FLAG_VALIDATOR_TYPE}
+      FLAG_VALIDATOR_TEAM: ${FLAG_VALIDATOR_TEAM}
+      PCAP_OVER_IP: ${PCAP_OVER_IP}
+      DUMP_PCAPS: ${DUMP_PCAPS}
+      DUMP_PCAPS_INTERVAL: ${DUMP_PCAPS_INTERVAL}
+      DUMP_PCAPS_FILENAME: ${DUMP_PCAPS_FILENAME}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  tulip-enricher:
+    build:
+      context: ./vendor/tulip/services/go-importer
+      dockerfile: Dockerfile-enricher
+    image: tulip-enricher:latest
+    restart: unless-stopped
+    depends_on: [tulip-timescale]
+    volumes:
+      - ${TRAFFIC_DIR_HOST}:${TRAFFIC_DIR_DOCKER}:ro
+    command: "./enricher -eve ${TRAFFIC_DIR_DOCKER}/eve.json"
+    environment:
+      TIMESCALE: ${TIMESCALE}
+
+  tulip-frontend:
+    build:
+      context: ./vendor/tulip/frontend
+      dockerfile: Dockerfile-frontend
+    image: tulip-frontend:latest
+    restart: unless-stopped
+    depends_on: [tulip-timescale, tulip-api]
+    ports:
+      - "3000:3000"
+    environment:
+      API_SERVER_ENDPOINT: http://tulip-api:5000/
+
+  suricata:
+    image: jasonish/suricata:latest
+    restart: unless-stopped
+    volumes:
+      - ${TRAFFIC_DIR_HOST}:${TRAFFIC_DIR_DOCKER}:rw
+      - ./configs/suricata/suricata.yaml:/etc/suricata/suricata.yaml:ro
+    command: >
+      suricata -c /etc/suricata/suricata.yaml
+      -l ${TRAFFIC_DIR_DOCKER}
+      -r ${TRAFFIC_DIR_DOCKER}
+      --pcap-file-continuous
+
+  zeek:
+    build: ./docker/zeek-watcher
+    restart: unless-stopped
+    environment:
+      TRAFFIC_DIR: ${TRAFFIC_DIR_DOCKER}
+      OUT_DIR: /zeeklogs
+      STATE_DIR: /state
+    volumes:
+      - ${TRAFFIC_DIR_HOST}:${TRAFFIC_DIR_DOCKER}:ro
+      - ./data/zeek-logs:/zeeklogs:rw
+      - zeek-state:/state:rw
+
+  opensearch:
+    image: opensearchproject/opensearch:2
+    restart: unless-stopped
+    environment:
+      discovery.type: single-node
+      OPENSEARCH_JAVA_OPTS: ${OPENSEARCH_JAVA_OPTS}
+      OPENSEARCH_INITIAL_ADMIN_PASSWORD: ${OPENSEARCH_INITIAL_ADMIN_PASSWORD}
+      plugins.security.disabled: "true"
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    volumes:
+      - opensearch-data:/usr/share/opensearch/data
+    ports:
+      - "9200:9200"
+
+  arkime-viewer:
+    image: ghcr.io/arkime/arkime/arkime:v5-latest
+    restart: unless-stopped
+    depends_on: [opensearch]
+    command: /opt/arkime/bin/docker.sh viewer -n ${ARKIME_NODENAME}
+    environment:
+      - ARKIME__elasticsearch=${ARKIME_ELASTICSEARCH}
+    volumes:
+      - ./configs/arkime/config.ini:/opt/arkime/etc/config.ini:ro
+      - ./data/arkime-raw:${ARKIME_PCAPDIR}:rw
+    ports:
+      - "8005:8005"
+
+  arkime-capture:
+    image: ghcr.io/arkime/arkime/arkime:v5-latest
+    restart: unless-stopped
+    depends_on: [opensearch]
+    command: >
+      /opt/arkime/bin/capture
+      -c /opt/arkime/etc/config.ini
+      -n ${ARKIME_NODENAME}
+      -R ${TRAFFIC_DIR_DOCKER}
+      -m -s
+    environment:
+      - ARKIME__elasticsearch=${ARKIME_ELASTICSEARCH}
+    volumes:
+      - ./configs/arkime/config.ini:/opt/arkime/etc/config.ini:ro
+      - ${TRAFFIC_DIR_HOST}:${TRAFFIC_DIR_DOCKER}:ro
+      - ./data/arkime-raw:${ARKIME_PCAPDIR}:rw
+
+volumes:
+  tulip-timescale-data:
+  opensearch-data:
+  zeek-state:
