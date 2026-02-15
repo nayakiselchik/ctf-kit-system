@@ -83,6 +83,7 @@ services:
       API_SERVER_ENDPOINT: http://tulip-api:5000/
 
   suricata:
+    profiles: ["ids"]
     image: jasonish/suricata:latest
     restart: unless-stopped
     volumes:
@@ -95,6 +96,7 @@ services:
       --pcap-file-continuous
 
   zeek:
+    profiles: ["telemetry"]
     build: ./docker/zeek-watcher
     restart: unless-stopped
     environment:
@@ -107,6 +109,7 @@ services:
       - zeek-state:/state:rw
 
   opensearch:
+    profiles: ["full"]
     image: opensearchproject/opensearch:2
     restart: unless-stopped
     environment:
@@ -127,6 +130,7 @@ services:
       - "9200:9200"
 
   arkime-viewer:
+    profiles: ["full"]
     image: ghcr.io/arkime/arkime/arkime:v5-latest
     restart: unless-stopped
     depends_on: [opensearch]
@@ -140,6 +144,7 @@ services:
       - "8005:8005"
 
   arkime-capture:
+    profiles: ["full"]
     image: ghcr.io/arkime/arkime/arkime:v5-latest
     restart: unless-stopped
     depends_on: [opensearch]
