@@ -1,3 +1,4 @@
 .env
 note_for_myself.txt
 .idea/
+/data

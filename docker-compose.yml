@@ -161,7 +161,18 @@ services:
       - ${TRAFFIC_DIR_HOST}:${TRAFFIC_DIR_DOCKER}:ro
       - ./data/arkime-raw:${ARKIME_PCAPDIR}:rw
 
+  flag-decoder:
+    build: ./docker/flag-decoder
+    image: flag-decoder:latest
+    restart: unless-stopped
+    depends_on: [tulip-timescale]
+    environment:
+      TIMESCALE: ${TIMESCALE}
+      FLAG_REGEX: ${FLAG_REGEX}
+      INTERVAL: ${DECODER_INTERVAL:-30}
+
 volumes:
   tulip-timescale-data:
   opensearch-data:
   zeek-state:
+
